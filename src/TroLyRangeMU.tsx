@@ -21,8 +21,8 @@ import {
 // FILE 4: src/TroLyRangeMU.tsx — FULL MODULE (CALCULATION ENGINE & UI)
 // - Giao diện Pastel & Neon hiện đại, tươi sáng, độ tương phản cao, chống mỏi mắt.
 // - Hỗ trợ tính toán & lọc điểm theo Số Lô độc lập của từng mức (L1, L2, L3).
-// - Chuẩn hóa BM.04: Khi chưa nhập Bias EQA hoặc Thẩm định, hiển thị rõ
-//   "0.00% (Chưa nhập)" và tính MU, Sigma dựa trên Bias = 0%.
+// - Chuẩn hóa BM.04 & BM.01: Khi chưa nhập Bias EQA hoặc Thẩm định, hiển thị rõ
+//   "0.00% (Chưa nhập)" và tính MU, Sigma khớp 100% với Phiếu in BM.01 & Biểu đồ L-J.
 // - Hỗ trợ chọn Nguồn Bias theo thứ tự ưu tiên SOP 5.2.3 (Peer Group -> Method
 //   -> All -> NSX -> Thẩm định) & Lưu vết lịch sử cập nhật Bias/TEa định kỳ
 //   3 tháng/lần (mu_audit_log).
@@ -261,13 +261,17 @@ export function applyLevelBiasesAndTeaToTestConfig(
 ): TestConfig {
   const buildUpdatedMu = (
     existingMu: LevelMuConfig | undefined,
-    biasVal: number | null,
-    meanVal: number,
-    sdVal: number
+    biasVal: number | null
   ): LevelMuConfig => {
     const base: LevelMuConfig = existingMu
       ? { ...existingMu }
       : { mu_mode: "PERIODIC_IQC" };
+
+    if (biasSource === "VERIFICATION") {
+      base.mu_mode = "INITIAL_VERIFICATION";
+    } else if (base.mu_mode !== "MANUAL") {
+      base.mu_mode = "PERIODIC_IQC";
+    }
 
     if (biasVal !== null && !isNaN(biasVal) && biasVal > 0) {
       const cleanB = Number(Math.abs(biasVal).toFixed(2));
@@ -276,17 +280,6 @@ export function applyLevelBiasesAndTeaToTestConfig(
         base.ubias_periodic = cleanB;
       } else {
         base.ubias_periodic = cleanB;
-      }
-      if (base.mu_mode === "NONE") {
-        base.mu_mode =
-          biasSource === "VERIFICATION"
-            ? "INITIAL_VERIFICATION"
-            : "PERIODIC_IQC";
-      }
-      if (!base.urw_pooled && meanVal > 0 && sdVal > 0) {
-        base.urw_pooled = Number(
-          Math.max((sdVal / meanVal) * 100, 0.01).toFixed(2)
-        );
       }
     } else {
       delete base.ubias_periodic;
@@ -304,15 +297,11 @@ export function applyLevelBiasesAndTeaToTestConfig(
     ...t,
     bias_source_priority: biasSource,
     mu_audit_log: nextAudit,
-    mu_L1: buildUpdatedMu(t.mu_L1, biasL1, t.mean_L1, t.sd_L1),
+    mu_L1: buildUpdatedMu(t.mu_L1, biasL1),
     mu_L2:
-      t.levels_count >= 2
-        ? buildUpdatedMu(t.mu_L2, biasL2, t.mean_L2, t.sd_L2)
-        : t.mu_L2,
+      t.levels_count >= 2 ? buildUpdatedMu(t.mu_L2, biasL2) : t.mu_L2,
     mu_L3:
-      t.levels_count === 3
-        ? buildUpdatedMu(t.mu_L3, biasL3, t.mean_L3, t.sd_L3)
-        : t.mu_L3,
+      t.levels_count === 3 ? buildUpdatedMu(t.mu_L3, biasL3) : t.mu_L3,
   };
 
   if (biasL1 !== null && !isNaN(biasL1) && biasL1 > 0) {
@@ -335,7 +324,8 @@ export function applyLevelBiasesAndTeaToTestConfig(
 
 /**
  * Tính toán chi tiết thống kê cho từng mức nồng độ (L1, L2, L3) chuẩn SOP 5.1, 5.2, 5.2.2, 5.2.3 & 5.2.4
- * Hỗ trợ lọc đúng Số Lô riêng của từng mức (lot_number_L1, lot_number_L2, lot_number_L3).
+ * Hỗ trợ lọc đúng Số Lô riêng của từng mức (lot_number_L1, lot_number_L2, lot_number_L3)
+ * và đồng bộ 100% công thức ĐKBĐĐ (BM.01) & Six Sigma với KieuDuLieu.ts và HoSoInAnISO.tsx.
  */
 export function computeDetailedLevelMetrics(
   t: TestConfig,
@@ -511,10 +501,14 @@ export function computeDetailedLevelMetrics(
   const effectiveSdForCalc =
     actualSd !== null && actualSd > 0 ? actualSd : targetSd;
 
-  // Tính Độ không đảm bảo đo theo chuẩn BM.01.XN.QTQL.30 & SOP 5.1 / 5.2
+  // ĐỒNG BỘ 100% CÔNG THỨC ĐKBĐĐ VỚI BM.01.XN.QTQL.30 (KieuDuLieu.ts & HoSoInAnISO.tsx)
   const muCfg: LevelMuConfig | undefined =
     level === "L1" ? t.mu_L1 : level === "L2" ? t.mu_L2 : t.mu_L3;
-  const isInitialVerif = muCfg?.mu_mode === "INITIAL_VERIFICATION";
+  const isInitialVerif =
+    muCfg?.mu_mode === "INITIAL_VERIFICATION" ||
+    (muCfg?.mu_mode === "NONE" && biasSourcePriority === "VERIFICATION");
+  const isManualMode =
+    muCfg?.mu_mode === "MANUAL" && Number(muCfg?.manual_mu || 0) > 0;
   const kFactor = isInitialVerif ? 1.96 : 2.0;
 
   let uRw: number | null = null;
@@ -525,23 +519,52 @@ export function computeDetailedLevelMetrics(
   let targetLimitPct: number | null = null;
   let isPassMu: boolean | null = null;
 
-  if (effectiveMeanForCalc > 0 && effectiveSdForCalc > 0) {
-    uRw = Number(effectiveSdForCalc.toFixed(3));
-    const biasAbs = (finalBiasPercent / 100) * effectiveMeanForCalc;
-    const uCalPct = Number(muCfg?.uc_cal || 0);
-    const uCalAbs = (uCalPct / 100) * effectiveMeanForCalc;
-    uBias = Number(
-      Math.sqrt(
-        Math.pow(biasAbs / Math.sqrt(3), 2) + Math.pow(uCalAbs, 2)
-      ).toFixed(3)
-    );
-    const uc = Math.sqrt(Math.pow(effectiveSdForCalc, 2) + Math.pow(uBias, 2));
-    uCombined = Number(uc.toFixed(3));
-    uExpanded = roundSmartDecimal(kFactor * uc, targetSd);
-    uRelExpanded = Number(
-      ((kFactor * uc * 100) / effectiveMeanForCalc).toFixed(2)
-    );
-    if (teaPercent > 0) {
+  if (effectiveMeanForCalc > 0 && (effectiveCvForCalc > 0 || isManualMode)) {
+    if (isManualMode) {
+      const manualVal = Number(muCfg?.manual_mu || 0);
+      uRw = Number(effectiveCvForCalc.toFixed(2));
+      uBias = Number(finalBiasPercent.toFixed(2));
+      uCombined = Number((manualVal / 2).toFixed(2));
+      uRelExpanded = Number(manualVal.toFixed(2));
+      uExpanded = roundSmartDecimal(
+        (uRelExpanded * effectiveMeanForCalc) / 100,
+        targetSd
+      );
+    } else if (isInitialVerif) {
+      const urPct = Number(muCfg?.verif_cvr || effectiveCvForCalc || 0);
+      const ubPct = Number(finalBiasPercent || 0);
+      const ucPct = Math.sqrt(Math.pow(urPct, 2) + Math.pow(ubPct, 2));
+      const uePct = kFactor * ucPct;
+      uRw = Number(urPct.toFixed(2));
+      uBias = Number(ubPct.toFixed(2));
+      uCombined = Number(ucPct.toFixed(2));
+      uRelExpanded = Number(uePct.toFixed(2));
+      uExpanded = roundSmartDecimal(
+        (uePct * effectiveMeanForCalc) / 100,
+        targetSd
+      );
+    } else {
+      const urwPct = Number(muCfg?.urw_pooled || effectiveCvForCalc || 0);
+      const ubPct = Number(finalBiasPercent || 0);
+      const ucalPct = Number(muCfg?.uc_cal || 0);
+      const ubCombinedPct = Math.sqrt(
+        Math.pow(ubPct, 2) + Math.pow(ucalPct, 2)
+      );
+      const ucPct = Math.sqrt(
+        Math.pow(urwPct, 2) + Math.pow(ubPct, 2) + Math.pow(ucalPct, 2)
+      );
+      const uePct = kFactor * ucPct;
+      uRw = Number(urwPct.toFixed(2));
+      uBias = Number(ubCombinedPct.toFixed(2));
+      uCombined = Number(ucPct.toFixed(2));
+      uRelExpanded = Number(uePct.toFixed(2));
+      uExpanded = roundSmartDecimal(
+        (uePct * effectiveMeanForCalc) / 100,
+        targetSd
+      );
+    }
+
+    if (teaPercent > 0 && uRelExpanded !== null) {
       targetLimitPct =
         teaUnit === "PERCENT"
           ? Number((0.75 * teaPercent).toFixed(2))
@@ -2022,7 +2045,7 @@ export default function TroLyRangeMU({
                                     </span>
                                   </div>
                                   <div className="text-[9.5px] font-bold text-indigo-700">
-                                    uRw: {stats.uRw} · uBias: {stats.uBias}{" "}
+                                    uRw: {stats.uRw}% · uBias: {stats.uBias}%{" "}
                                     {stats.isPassMu !== null && (
                                       <b
                                         className={`px-1 py-0.2 rounded ${
