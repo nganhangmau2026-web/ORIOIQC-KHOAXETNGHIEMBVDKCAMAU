@@ -9,7 +9,8 @@ import React, { useState, useEffect } from "react";
 //   và tài liệu Quy tắc Westgard 2 mức / 3 mức phối hợp (1-3s, 2-2s, 2/3-2s, R-4s, 3-1s, 4-1s, 10x, 12x).
 // - Hỗ trợ lưu trạng thái đơn mức (single_level_status / single_level_rule) tách biệt với
 //   trạng thái phối hợp 3 mức trên Biểu đồ Levey-Jennings.
-// - Hỗ trợ đầy đủ Đa lọ Hóa chất & Số Lô độc lập từng mức (L1, L2, L3).
+// - Hỗ trợ đầy đủ Đa lọ Hóa chất & Số Lô độc lập từng mức (L1, L2, L3) và
+//   đồng bộ 100% công thức MU & Six Sigma giữa mọi Tab và Bản in ISO.
 // ✦ An intellectual product by Handsome Long ✦
 // ============================================================================
 
@@ -256,7 +257,7 @@ export function getSuggestedCliaTea(testName: string): number | undefined {
     return CLIA_TEA_REFERENCE_MAP[clean];
   }
   for (const [k, v] of Object.entries(CLIA_TEA_REFERENCE_MAP)) {
-    if (clean.startsWith(`${k} `) || clean.includes(`(${k})`)) {
+    if (clean.startsWith(`${k} `) || clean.indexOf(`(${k})`) !== -1) {
       return v;
     }
   }
@@ -508,7 +509,7 @@ export function hasPermission(
 ): boolean {
   if (!user) return false;
   if (user.id.toLowerCase() === "thlong") return true;
-  return getEffectivePermissions(user).includes(perm);
+  return getEffectivePermissions(user).indexOf(perm) !== -1;
 }
 
 // --- KIẾN TRÚC DỮ LIỆU & DẤU VẾT KIỂM TOÁN (AUDIT TRAIL ISO 15189) ---
@@ -1151,8 +1152,9 @@ export function computeMuAndSigma(
   const teaVal = hasTea ? Number(cfg.tea) : 0;
   const teaUnit = cfg.tea_unit || "PERCENT";
 
+  // Đồng bộ 100% CV% và SD dùng để tính Six Sigma giữa Biểu đồ L-J, Bản in L-J và Trợ lý Range & MU
   const effectiveCvForSigma =
-    validPointsCount >= 15
+    validPointsCount >= 2
       ? cvPct
       : muCfg.urw_pooled && muCfg.urw_pooled > 0
       ? muCfg.urw_pooled
@@ -1160,7 +1162,7 @@ export function computeMuAndSigma(
       ? cfgCvPct
       : cvPct;
   const effectiveSdForSigma =
-    validPointsCount >= 15
+    validPointsCount >= 2
       ? rawSdLab > 0
         ? rawSdLab
         : cfgSd
@@ -1196,7 +1198,14 @@ export function computeMuAndSigma(
     if (sigma !== null) sigma = Math.max(0, Math.min(16, sigma));
   }
 
-  const mode = muCfg.mu_mode;
+  const mode =
+    muCfg.mu_mode === "NONE" &&
+    (cfg.bias_source_priority || usedBiasPct > 0 || cvPct > 0)
+      ? cfg.bias_source_priority === "VERIFICATION"
+        ? "INITIAL_VERIFICATION"
+        : "PERIODIC_IQC"
+      : muCfg.mu_mode;
+
   let ucPct: number | null = null;
   let uePct: number | null = null;
   let formulaNote = "Vui lòng cấu hình tham số MU cho mức này";
