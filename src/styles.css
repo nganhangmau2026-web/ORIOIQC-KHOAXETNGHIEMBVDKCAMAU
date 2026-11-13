@@ -1,0 +1,103 @@
+/* ==========================================================================
+   FILE 12: src/styles.css (V7.0 ENTERPRISE GLOBAL STYLES & PRINT ENGINE)
+   - Tối ưu thanh cuộn siêu mảnh cho bảng dữ liệu lớn (20+ máy x 25+ xét nghiệm).
+   - Ẩn mũi tên tăng/giảm mặc định của ô nhập số giúp chống lệch số khi cuộn chuột.
+   - Chuẩn hóa in màu độ tương phản cao trên máy in phun Epson L1110 (A4).
+   ✦ An intellectual product by Handsome Long ✦
+   ========================================================================== */
+
+.App {
+  font-family: sans-serif;
+  text-align: center;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f4f7fb;
+  color: #1e293b;
+}
+
+/* Ẩn nút mũi tên tăng giảm mặc định trong ô input[type="number"] */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Thanh cuộn mảnh hiện đại cho các bảng Kiosk, BM.09 và Trợ lý Range & MU */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Hiệu ứng chuyển cảnh mượt khi rê chuột trên Biểu đồ L-J & Modal */
+@keyframes orioFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: orioFadeIn 0.16s ease-out forwards;
+}
+
+/* Chuẩn hóa in ấn ISO 15189:2022 & QĐ 2429 trên máy in màu A4 */
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .no-print-placeholder::placeholder {
+    color: transparent !important;
+  }
+
+  .print-paper {
+    border: none !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+}
